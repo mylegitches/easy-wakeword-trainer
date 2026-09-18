@@ -385,3 +385,100 @@ async def stream_events(job: TrainJob) -> AsyncIterator[str]:
 def _sse(event: str, data: str) -> str:
     safe = data.replace("\n", " ")
     return f"event: {event}\ndata: {safe}\n\n"
+
+
+# ---------------------------------------------------------------------------
+# Prepare job — first-run data download with live SSE progress
+# ---------------------------------------------------------------------------
+
+class PrepareStage(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    ERROR = "error"
+
+
+@dataclass
+class PrepareJob:
+    job_id: str
+    stage: PrepareStage = PrepareStage.PENDING
+    error: Optional[str] = None
+    log_lines: list[str] = field(default_factory=list)
+    _queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+
+    def is_done(self) -> bool:
+        return self.stage in (PrepareStage.DONE, PrepareStage.ERROR)
+
+
+_prepare_job: Optional[PrepareJob] = None
+
+
+def get_prepare_job() -> Optional[PrepareJob]:
+    return _prepare_job
+
+
+def prepare_running() -> bool:
+    return _prepare_job is not None and not _prepare_job.is_done()
+
+
+PREPARE_SCRIPT = Path(__file__).parent.parent / "scripts" / "prepare_data.py"
+
+
+async def run_prepare(job: PrepareJob) -> None:
+    """
+    Stream scripts/prepare_data.py as a subprocess, forwarding every output line
+    to the SSE queue. Fully programmatic — no LLM or cloud-AI calls.
+    """
+    global _prepare_job
+    _prepare_job = job
+    job.stage = PrepareStage.RUNNING
+
+    await job._queue.put(("running", "Starting data download…"))
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, str(PREPARE_SCRIPT),
+            "--data-dir", str(DATA_DIR),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        assert proc.stdout is not None
+        async for raw in proc.stdout:
+            line = raw.decode(errors="replace").rstrip()
+            job.log_lines.append(line)
+            await job._queue.put(("log", line))
+
+        rc = await proc.wait()
+        if rc != 0:
+            raise RuntimeError(f"prepare_data.py exited with code {rc}")
+
+        job.stage = PrepareStage.DONE
+        await job._queue.put(("done", "All assets downloaded and ready."))
+
+    except Exception as exc:
+        job.stage = PrepareStage.ERROR
+        job.error = str(exc)
+        await job._queue.put(("error", f"ERROR: {exc}"))
+
+    finally:
+        await job._queue.put(None)
+
+
+async def stream_prepare_events(job: PrepareJob) -> AsyncIterator[str]:
+    """SSE generator for the prepare job — replays history then follows live."""
+    for line in job.log_lines:
+        yield _sse("log", line)
+
+    if job.is_done():
+        yield _sse(job.stage.value, job.error or "done")
+        return
+
+    while True:
+        item = await asyncio.wait_for(job._queue.get(), timeout=60)
+        if item is None:
+            await job._queue.put(None)
+            yield _sse(job.stage.value, job.error or "done")
+            return
+        event, data = item
+        yield _sse(event, data)

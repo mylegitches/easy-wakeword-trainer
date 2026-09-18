@@ -1,0 +1,46 @@
+# Dockerfile.dev — web layer + data-download layer (no torch/training stack).
+# Supports: UI, health check, automatic first-run data download with live progress.
+# Training itself requires the full Dockerfile (torch, speechbrain, onnx2tf, etc.).
+FROM python:3.11-slim-bookworm
+
+# wget/curl/git needed by prepare_data.py
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Pin multiprocess first — avoids the long pip backtrack caused by datasets' loose dep
+RUN pip install --no-cache-dir multiprocess==0.70.15 dill==0.3.7
+
+RUN pip install --no-cache-dir \
+    fastapi==0.111.0 \
+    "uvicorn[standard]==0.29.0" \
+    python-multipart==0.0.9 \
+    pyyaml==6.0.1 \
+    numpy==1.26.4 \
+    scipy==1.13.0 \
+    soundfile \
+    pyarrow \
+    fsspec \
+    huggingface-hub \
+    "datasets==2.14.6"
+
+# App code only — no openwakeword or piper clones needed for UI
+COPY app/ /app/app/
+COPY scripts/ /app/scripts/
+COPY make_validation_small.py /app/make_validation_small.py
+
+RUN mkdir -p /outputs /data
+
+ENV PYTHONUNBUFFERED=1
+ENV DATA_DIR=/data
+ENV OUTPUT_DIR=/outputs
+ENV OPENWAKEWORD_DIR=/app/openwakeword
+ENV PIPER_GENERATOR_DIR=/app/piper-sample-generator
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -21,6 +21,8 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import uuid
+
 from app import pipeline as pl
 
 app = FastAPI(title="easy-wakeword-trainer", docs_url=None, redoc_url=None)
@@ -58,6 +60,50 @@ async def health():
         },
         "missing": missing,
     }
+
+
+# ---------------------------------------------------------------------------
+# Prepare — first-run data download
+# ---------------------------------------------------------------------------
+
+@app.post("/api/prepare", status_code=202)
+async def start_prepare(background_tasks: BackgroundTasks):
+    """Start the data-download job. Idempotent if data is already present."""
+    if pl.prepare_running():
+        job = pl.get_prepare_job()
+        return {"job_id": job.job_id, "status": "already_running"}
+
+    if pl.all_data_present():
+        return {"job_id": None, "status": "already_ready"}
+
+    job = pl.PrepareJob(job_id=str(uuid.uuid4()))
+    background_tasks.add_task(pl.run_prepare, job)
+    return {"job_id": job.job_id, "status": "started"}
+
+
+@app.get("/api/prepare/status")
+async def prepare_status():
+    job = pl.get_prepare_job()
+    if not job:
+        return {"stage": "not_started", "log_lines": []}
+    return {
+        "job_id": job.job_id,
+        "stage": job.stage.value,
+        "error": job.error,
+        "log_lines": job.log_lines[-50:],  # last 50 lines for polling fallback
+    }
+
+
+@app.get("/api/prepare/events")
+async def prepare_events():
+    job = pl.get_prepare_job()
+    if not job:
+        raise HTTPException(status_code=404, detail="No prepare job started yet.")
+    return StreamingResponse(
+        pl.stream_prepare_events(job),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ---------------------------------------------------------------------------

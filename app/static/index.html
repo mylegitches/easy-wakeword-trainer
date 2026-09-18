@@ -13,12 +13,24 @@
       <p class="subtitle">Type a wake phrase and train your own openWakeWord model — no coding required.</p>
     </header>
 
-    <!-- Data health banner (shown when assets are missing) -->
-    <div id="health-banner" class="banner banner--warning hidden">
-      <strong>Training data is not ready.</strong>
-      <span id="health-details"></span>
-      <br /><small>Run <code>docker compose run --rm prepare</code> to download required assets.</small>
-    </div>
+    <!-- Data health / download section (shown when assets are missing or downloading) -->
+    <section id="prepare-section" class="card card--prepare hidden">
+      <div class="prepare-header">
+        <div>
+          <strong id="prepare-title">Training data not ready</strong>
+          <p id="prepare-subtitle" class="prepare-subtitle">
+            The first run requires downloading ~5–20 GB of training assets.
+          </p>
+        </div>
+        <button id="prepare-btn" class="btn btn--download">Download Data</button>
+      </div>
+
+      <!-- Missing asset list (shown before download starts) -->
+      <ul id="missing-list" class="missing-list"></ul>
+
+      <!-- Progress log (shown while downloading) -->
+      <pre id="prepare-log" class="log-panel hidden"></pre>
+    </section>
 
     <!-- Main form -->
     <section class="card form-card">

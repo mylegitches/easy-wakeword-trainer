@@ -1,0 +1,27 @@
+# Dockerfile.prepare — slim image just for downloading training assets.
+# Installs only what scripts/prepare_data.py needs (no torch, no training stack).
+FROM python:3.11-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    numpy==1.26.4 \
+    scipy==1.13.0 \
+    datasets==2.14.6 \
+    soundfile \
+    pyyaml==6.0.1
+
+WORKDIR /app
+COPY scripts/prepare_data.py /app/scripts/prepare_data.py
+COPY make_validation_small.py /app/make_validation_small.py
+
+RUN mkdir -p /data
+
+ENV PYTHONUNBUFFERED=1
+ENV DATA_DIR=/data
+
+CMD ["python", "scripts/prepare_data.py"]

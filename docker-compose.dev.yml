@@ -1,0 +1,30 @@
+# docker-compose.dev.yml — quick UI test + data download (no training deps)
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build           # start UI
+#   docker compose -f docker-compose.dev.yml run --rm prepare     # download data
+services:
+  trainer-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data
+      - ./outputs:/outputs
+    environment:
+      - DATA_DIR=/data
+      - OUTPUT_DIR=/outputs
+      - OPENWAKEWORD_DIR=/app/openwakeword
+      - PIPER_GENERATOR_DIR=/app/piper-sample-generator
+    restart: unless-stopped
+
+  # Download all required training assets into ./data (one-time, ~5-20 GB)
+  prepare:
+    build:
+      context: .
+      dockerfile: Dockerfile.prepare
+    volumes:
+      - ./data:/data
+    environment:
+      - DATA_DIR=/data

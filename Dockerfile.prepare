@@ -11,7 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir \
     numpy==1.26.4 \
     scipy==1.13.0 \
-    datasets==2.14.6 \
+    "pyarrow==13.0.0" \
+    "fsspec==2023.10.0" \
+    "huggingface-hub==0.19.4" \
+    "datasets==2.14.6" \
     soundfile \
     pyyaml==6.0.1
 

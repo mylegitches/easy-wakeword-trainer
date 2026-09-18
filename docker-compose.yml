@@ -1,0 +1,26 @@
+services:
+  trainer:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data
+      - ./outputs:/outputs
+    environment:
+      - DATA_DIR=/data
+      - OUTPUT_DIR=/outputs
+      - OPENWAKEWORD_DIR=/app/openwakeword
+      - PIPER_GENERATOR_DIR=/app/piper-sample-generator
+    restart: unless-stopped
+
+  # Optional: run once to download training assets
+  # docker compose run --rm prepare
+  prepare:
+    build: .
+    volumes:
+      - ./data:/data
+    environment:
+      - DATA_DIR=/data
+    command: ["python", "scripts/prepare_data.py"]
+    profiles:
+      - prepare

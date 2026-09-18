@@ -1,0 +1,227 @@
+/* ------------------------------------------------------------------ */
+/* Reset & base                                                         */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0f1117;
+  --surface:   #1a1d27;
+  --border:    #2c2f3e;
+  --accent:    #6c63ff;
+  --accent-h:  #857dff;
+  --success:   #22c55e;
+  --warning:   #f59e0b;
+  --danger:    #ef4444;
+  --text:      #e2e8f0;
+  --muted:     #64748b;
+  --mono:      "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  --radius:    10px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  min-height: 100vh;
+  padding: 2rem 1rem 4rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Layout                                                               */
+/* ------------------------------------------------------------------ */
+.container {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+header { text-align: center; padding: 1rem 0 0.5rem; }
+header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
+.subtitle { color: var(--muted); margin-top: 0.4rem; }
+
+/* ------------------------------------------------------------------ */
+/* Card                                                                 */
+/* ------------------------------------------------------------------ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+}
+.card--success { border-color: var(--success); }
+.card--error   { border-color: var(--danger); }
+
+/* ------------------------------------------------------------------ */
+/* Banner                                                               */
+/* ------------------------------------------------------------------ */
+.banner {
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+.banner--warning {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid var(--warning);
+  color: #fde68a;
+}
+
+/* ------------------------------------------------------------------ */
+/* Form                                                                 */
+/* ------------------------------------------------------------------ */
+.field-label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+
+.input-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.phrase-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 1.15rem;
+  padding: 0.7rem 1rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.phrase-input:focus { border-color: var(--accent); }
+.phrase-input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 0.4rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                              */
+/* ------------------------------------------------------------------ */
+.btn {
+  display: inline-block;
+  padding: 0.7rem 1.4rem;
+  border-radius: var(--radius);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  border: none;
+  text-decoration: none;
+  transition: background 0.15s, opacity 0.15s;
+  white-space: nowrap;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn--primary  { background: var(--accent); color: #fff; }
+.btn--primary:hover:not(:disabled) { background: var(--accent-h); }
+
+.btn--download  { background: var(--success); color: #000; }
+.btn--download:hover { opacity: 0.85; }
+
+.btn--secondary { background: var(--border); color: var(--text); }
+.btn--secondary:hover { opacity: 0.85; }
+
+/* ------------------------------------------------------------------ */
+/* Progress                                                             */
+/* ------------------------------------------------------------------ */
+.progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.progress-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.stages {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+}
+
+.stage {
+  padding: 0.2rem 0.6rem;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  transition: background 0.2s, color 0.2s;
+}
+.stage.active  { background: var(--accent); color: #fff; border-color: var(--accent); }
+.stage.done    { background: var(--success); color: #000; border-color: var(--success); }
+.stage-sep     { color: var(--muted); }
+
+/* ------------------------------------------------------------------ */
+/* Log panel                                                            */
+/* ------------------------------------------------------------------ */
+.log-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: #94a3b8;
+  max-height: 340px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ------------------------------------------------------------------ */
+/* Downloads                                                            */
+/* ------------------------------------------------------------------ */
+.done-title {
+  font-size: 1.1rem;
+  color: var(--success);
+  margin-bottom: 1rem;
+}
+
+.download-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Error                                                                */
+/* ------------------------------------------------------------------ */
+.error-msg {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: #fca5a5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: 0.5rem;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* Utility                                                              */
+/* ------------------------------------------------------------------ */
+.hidden { display: none !important; }

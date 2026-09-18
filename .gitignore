@@ -1,0 +1,31 @@
+# Large data files — download separately via scripts/prepare_data.py
+data/
+features_neg.npy
+validation_set_features.npy
+validation_set_features_small.npy
+fma/
+mit_rirs/
+openwakeword/
+piper-sample-generator/
+
+# Training outputs
+outputs/
+my_custom_model/
+*.onnx
+*.tflite
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Docker
+.docker/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp

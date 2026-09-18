@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Easy Wakeword Trainer</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Easy Wakeword Trainer</h1>
+      <p class="subtitle">Type a wake phrase and train your own openWakeWord model — no coding required.</p>
+    </header>
+
+    <!-- Data health banner (shown when assets are missing) -->
+    <div id="health-banner" class="banner banner--warning hidden">
+      <strong>Training data is not ready.</strong>
+      <span id="health-details"></span>
+      <br /><small>Run <code>docker compose run --rm prepare</code> to download required assets.</small>
+    </div>
+
+    <!-- Main form -->
+    <section class="card form-card">
+      <label for="phrase-input" class="field-label">Wake phrase</label>
+      <div class="input-row">
+        <input
+          id="phrase-input"
+          type="text"
+          class="phrase-input"
+          placeholder="e.g. hey computer"
+          maxlength="80"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="train-btn" class="btn btn--primary" disabled>Train</button>
+      </div>
+      <p class="hint">Letters, numbers, and spaces only · max 6 words</p>
+    </section>
+
+    <!-- Progress section (hidden until job starts) -->
+    <section id="progress-section" class="card hidden">
+      <div class="progress-header">
+        <span id="progress-label" class="progress-label">Starting…</span>
+        <div class="stages">
+          <span id="stage-generate" class="stage">Generate</span>
+          <span class="stage-sep">›</span>
+          <span id="stage-augment"  class="stage">Augment</span>
+          <span class="stage-sep">›</span>
+          <span id="stage-train"    class="stage">Train</span>
+          <span class="stage-sep">›</span>
+          <span id="stage-export"   class="stage">Export</span>
+        </div>
+      </div>
+      <pre id="log-panel" class="log-panel"></pre>
+    </section>
+
+    <!-- Download section (hidden until done) -->
+    <section id="download-section" class="card card--success hidden">
+      <h2 class="done-title">&#x2713; Model ready: <span id="model-name-out"></span></h2>
+      <div class="download-row">
+        <a id="dl-zip"    class="btn btn--download" download>Download .zip (ONNX + TFLite)</a>
+        <a id="dl-onnx"   class="btn btn--download btn--secondary" download>ONNX</a>
+        <a id="dl-tflite" class="btn btn--download btn--secondary" download>TFLite</a>
+      </div>
+    </section>
+
+    <!-- Error section -->
+    <section id="error-section" class="card card--error hidden">
+      <h2>Training failed</h2>
+      <pre id="error-msg" class="error-msg"></pre>
+    </section>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

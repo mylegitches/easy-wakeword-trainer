@@ -20,14 +20,13 @@ Downloads
 6. Truncated validation set    (validation_set_features_small.npy, 50k rows — OOM fix)
 
 All downloads are skipped if the file/directory already exists (idempotent).
-No LLM or cloud-AI APIs are used — these are plain wget/HuggingFace dataset pulls.
+No LLM or cloud-AI APIs are used — these are plain Python requests / HuggingFace dataset pulls.
 """
 
 import argparse
 import os
-import shutil
-import subprocess
 import sys
+import time
 from pathlib import Path
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -37,18 +36,69 @@ def log(msg: str) -> None:
     print(f"[prepare] {msg}", flush=True)
 
 
-def run(cmd: list[str], **kwargs) -> None:
-    log(f"$ {' '.join(str(c) for c in cmd)}")
-    subprocess.run(cmd, check=True, **kwargs)
+def stream_download(url: str, dest: Path, desc: str = "", report_every_mb: int = 200) -> None:
+    """
+    Stream-download url → dest using requests, logging progress every
+    report_every_mb megabytes. Supports resume: if dest already exists
+    as a partial file, sends a Range header to continue from where it left off.
+    Produces far fewer log lines than wget --show-progress (one per N MB vs one per 50KB).
+    """
+    import requests
 
-
-def wget(url: str, dest: Path) -> None:
-    """Download url to dest using wget (or curl fallback)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if shutil.which("wget"):
-        run(["wget", "-q", "--show-progress", "-O", str(dest), url])
-    else:
-        run(["curl", "-L", "--progress-bar", "-o", str(dest), url])
+    report_every = report_every_mb * 1024 * 1024
+    CHUNK = 8 * 1024 * 1024  # 8 MB read chunks
+
+    # Resume support: check existing partial file
+    resume_from = dest.stat().st_size if dest.exists() else 0
+    headers = {}
+    if resume_from:
+        headers["Range"] = f"bytes={resume_from}-"
+        log(f"Resuming {desc or dest.name} from {resume_from / 1024**2:.0f} MB")
+
+    r = requests.get(url, stream=True, timeout=60, headers=headers)
+
+    # 416 = Range Not Satisfiable → file is already complete
+    if r.status_code == 416:
+        log(f"{desc or dest.name}: already fully downloaded")
+        return
+    r.raise_for_status()
+
+    total_remote = int(r.headers.get("content-length", 0))
+    total = resume_from + total_remote  # full file size
+
+    mode = "ab" if resume_from else "wb"
+    downloaded = resume_from
+    last_report = resume_from
+    last_t = time.time()
+    t_start = last_t
+
+    with open(dest, mode) as f:
+        for chunk in r.iter_content(CHUNK):
+            if not chunk:
+                continue
+            f.write(chunk)
+            downloaded += len(chunk)
+
+            if downloaded - last_report >= report_every:
+                elapsed = max(time.time() - last_t, 0.001)
+                speed_mb = (downloaded - last_report) / elapsed / 1024 / 1024
+                done_gb = downloaded / 1024 ** 3
+                if total:
+                    pct = min(100, downloaded * 100 // total)
+                    total_gb = total / 1024 ** 3
+                    eta_s = int((total - downloaded) / max(downloaded / max(time.time() - t_start, 0.001), 0.001))
+                    eta = f"ETA {eta_s // 60}m{eta_s % 60:02d}s"
+                    log(f"  {done_gb:.2f} / {total_gb:.2f} GB ({pct}%) @ {speed_mb:.1f} MB/s  {eta}")
+                else:
+                    log(f"  {done_gb:.2f} GB @ {speed_mb:.1f} MB/s")
+                last_report = downloaded
+                last_t = time.time()
+
+    final_gb = downloaded / 1024 ** 3
+    elapsed = max(time.time() - t_start, 0.001)
+    avg_mb = downloaded / elapsed / 1024 / 1024
+    log(f"  Done: {final_gb:.2f} GB in {elapsed / 60:.1f} min (avg {avg_mb:.1f} MB/s)")
 
 
 # ── HuggingFace base URLs ─────────────────────────────────────────────────
@@ -66,11 +116,11 @@ PIPER_CKPT_URL = (
 
 def step_piper_checkpoint(data: Path) -> None:
     dest = data / "piper-sample-generator" / "models" / "en_US-libritts_r-medium.pt"
-    if dest.exists():
+    if dest.exists() and dest.stat().st_size > 100_000_000:  # >100MB means complete
         log(f"Piper checkpoint already present: {dest}")
         return
     log("Downloading Piper TTS checkpoint (~1.8 GB)…")
-    wget(PIPER_CKPT_URL, dest)
+    stream_download(PIPER_CKPT_URL, dest, desc="Piper checkpoint", report_every_mb=200)
     log(f"Saved: {dest}")
 
 
@@ -141,29 +191,44 @@ def step_fma(data: Path) -> None:
 
 def step_acav_features(data: Path) -> None:
     dest = data / "features_neg.npy"
-    # Check for the canonical name as well as the long HuggingFace filename
     hf_name = data / "openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
-    if dest.exists():
+
+    if dest.exists() and not dest.is_symlink():
         log(f"Negative features already present: {dest}")
         return
-    if hf_name.exists():
+    if dest.is_symlink() and dest.resolve().exists():
+        log(f"Negative features already present (symlink): {dest}")
+        return
+    if hf_name.exists() and hf_name.stat().st_size > 1_000_000_000:
         log(f"Symlinking HuggingFace ACAV file → features_neg.npy")
-        dest.symlink_to(hf_name)
+        if not dest.exists():
+            dest.symlink_to(hf_name)
         return
 
-    log("Downloading ACAV negative features (~4–17 GB). This may take a while…")
-    wget(f"{HF_OWW}/openwakeword_features_ACAV100M_2000_hrs_16bit.npy", hf_name)
-    dest.symlink_to(hf_name)
+    log("Downloading ACAV negative features (~4–17 GB). Logs every 200 MB…")
+    stream_download(
+        f"{HF_OWW}/openwakeword_features_ACAV100M_2000_hrs_16bit.npy",
+        hf_name,
+        desc="ACAV features",
+        report_every_mb=200,
+    )
+    if not dest.exists():
+        dest.symlink_to(hf_name)
     log(f"Saved: {hf_name} → {dest}")
 
 
 def step_validation_features(data: Path) -> None:
     dest = data / "validation_set_features.npy"
-    if dest.exists():
+    if dest.exists() and dest.stat().st_size > 10_000_000:
         log(f"Validation features already present: {dest}")
     else:
         log("Downloading validation features (~180 MB)…")
-        wget(f"{HF_OWW}/validation_set_features.npy", dest)
+        stream_download(
+            f"{HF_OWW}/validation_set_features.npy",
+            dest,
+            desc="Validation features",
+            report_every_mb=50,
+        )
         log(f"Saved: {dest}")
 
     # Always ensure the truncated 50k-row version exists (OOM fix for step 7500)

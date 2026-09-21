@@ -138,18 +138,21 @@ function connectPrepareSSE(jobId) {
     onPrepareComplete();
   });
 
+  // Server sent an explicit "error" event (training pipeline error)
   es.addEventListener("error", (e) => {
-    appendPrepareLog("ERROR: " + (e.data || "Download failed."));
-    setPrepareState(false);
-    es.close();
+    if (e.data) {
+      appendPrepareLog("ERROR: " + e.data);
+      setPrepareState(false);
+      es.close();
+    }
+    // if e.data is empty this is an SSE transport error, handled by es.onerror below
   });
 
   es.onerror = () => {
-    if (es.readyState !== EventSource.CLOSED) {
-      appendPrepareLog("[Connection lost — polling…]");
-      es.close();
-      pollPrepare();
-    }
+    if (es.readyState === EventSource.CLOSED) return;
+    appendPrepareLog("[SSE connection dropped — switching to polling…]");
+    es.close();
+    pollPrepare();
   };
 }
 

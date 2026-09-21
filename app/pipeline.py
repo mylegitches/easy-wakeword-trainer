@@ -146,12 +146,32 @@ REQUIRED_DATA = {
 }
 
 
+def _asset_complete(p: Path) -> bool:
+    """
+    True if the asset at path p is fully present.
+    - Directories (mit_rirs, fma): must exist and be non-empty.
+    - Files downloaded by stream_download: must have a sibling .done marker.
+    - Symlinks (features_neg.npy → ACAV file): both the link and the target's
+      .done marker must exist.
+    """
+    if not p.exists():
+        return False
+    if p.is_dir():
+        return any(p.iterdir())
+    if p.is_symlink():
+        target = p.resolve()
+        return target.exists() and target.with_name(target.name + ".done").exists()
+    # Regular file — check for .done marker
+    marker = p.with_name(p.name + ".done")
+    return marker.exists()
+
+
 def check_data() -> dict[str, bool]:
-    """Return {asset_name: present} for each required asset."""
+    """Return {asset_name: present_and_complete} for each required asset."""
     result = {}
     for name in REQUIRED_DATA:
         p = DATA_DIR / name
-        result[name] = p.exists()
+        result[name] = _asset_complete(p)
     return result
 
 

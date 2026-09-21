@@ -36,17 +36,43 @@ def log(msg: str) -> None:
     print(f"[prepare] {msg}", flush=True)
 
 
+def _done_marker(path: Path) -> Path:
+    """Return the path of the completion marker for a downloaded file."""
+    return path.with_name(path.name + ".done")
+
+
+def is_download_complete(path: Path) -> bool:
+    """
+    Returns True only if the file exists AND its .done marker exists.
+    The marker is written by stream_download() only on successful completion,
+    so partial downloads are never mistaken for complete ones.
+    """
+    marker = _done_marker(path)
+    if marker.exists() and not path.exists():
+        # Marker orphaned (file deleted manually) — remove it so we re-download.
+        marker.unlink()
+        return False
+    return path.exists() and marker.exists()
+
+
 def stream_download(url: str, dest: Path, desc: str = "", report_every_mb: int = 200) -> None:
     """
     Stream-download url → dest using requests, logging progress every
     report_every_mb megabytes.
 
-    - Resume: if dest already has bytes, sends a Range header to skip them.
-    - Retry: up to MAX_RETRIES times on timeout/connection errors, always resuming.
-    - Timeout: (30s connect, 120s read-per-chunk). HF CDN sometimes stalls
-      mid-transfer; 120s per 8MB chunk is generous enough to survive slow bursts.
+    - Completion: writes {dest}.done on success. Use is_download_complete() to check.
+    - Resume: if dest already has bytes (from a prior failed attempt), sends a
+      Range header to continue from where it left off.
+    - Retry: up to MAX_RETRIES times on timeout/connection errors.
+    - Timeout: (30s connect, 120s read-per-8MB-chunk). HF CDN can stall mid-transfer;
+      120s per chunk is generous enough to survive slow bursts without false kills.
     """
     import requests
+
+    # Already fully downloaded — nothing to do.
+    if is_download_complete(dest):
+        log(f"{desc or dest.name}: already downloaded (complete)")
+        return
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     report_every = report_every_mb * 1024 * 1024
@@ -74,9 +100,10 @@ def stream_download(url: str, dest: Path, desc: str = "", report_every_mb: int =
         try:
             r = requests.get(url, stream=True, timeout=(30, 120), headers=headers)
 
-            # 416 = Range Not Satisfiable → file is already complete
+            # 416 = Range Not Satisfiable → server says we already have everything
             if r.status_code == 416:
-                log(f"{desc or dest.name}: already fully downloaded")
+                log(f"{desc or dest.name}: server confirms file is complete")
+                _done_marker(dest).touch()
                 return
             r.raise_for_status()
 
@@ -112,11 +139,13 @@ def stream_download(url: str, dest: Path, desc: str = "", report_every_mb: int =
                         last_report = downloaded
                         last_t = time.time()
 
-            # Download complete
+            # ── Download complete ─────────────────────────────────────────
             final_gb = downloaded / 1024 ** 3
             total_elapsed = max(time.time() - t_global_start, 0.001)
             avg_mb = downloaded / total_elapsed / 1024 / 1024
             log(f"  Done: {final_gb:.2f} GB in {total_elapsed / 60:.1f} min (avg {avg_mb:.1f} MB/s)")
+            # Write completion marker — this is the only place it's created.
+            _done_marker(dest).touch()
             return
 
         except _RETRYABLE as exc:
@@ -142,7 +171,7 @@ PIPER_CKPT_URL = (
 
 def step_piper_checkpoint(data: Path) -> None:
     dest = data / "piper-sample-generator" / "models" / "en_US-libritts_r-medium.pt"
-    if dest.exists() and dest.stat().st_size > 100_000_000:  # >100MB means complete
+    if is_download_complete(dest):
         log(f"Piper checkpoint already present: {dest}")
         return
     log("Downloading Piper TTS checkpoint (~1.8 GB)…")
@@ -216,19 +245,15 @@ def step_fma(data: Path) -> None:
 
 
 def step_acav_features(data: Path) -> None:
-    dest = data / "features_neg.npy"
     hf_name = data / "openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+    dest = data / "features_neg.npy"  # symlink → hf_name
 
-    if dest.exists() and not dest.is_symlink():
-        log(f"Negative features already present: {dest}")
-        return
-    if dest.is_symlink() and dest.resolve().exists():
-        log(f"Negative features already present (symlink): {dest}")
-        return
-    if hf_name.exists() and hf_name.stat().st_size > 1_000_000_000:
-        log(f"Symlinking HuggingFace ACAV file → features_neg.npy")
+    if is_download_complete(hf_name):
+        log(f"ACAV features already downloaded: {hf_name}")
+        # Ensure symlink exists
         if not dest.exists():
             dest.symlink_to(hf_name)
+            log(f"Symlinked: features_neg.npy → {hf_name.name}")
         return
 
     log("Downloading ACAV negative features (~4–17 GB). Logs every 200 MB…")
@@ -245,7 +270,7 @@ def step_acav_features(data: Path) -> None:
 
 def step_validation_features(data: Path) -> None:
     dest = data / "validation_set_features.npy"
-    if dest.exists() and dest.stat().st_size > 10_000_000:
+    if is_download_complete(dest):
         log(f"Validation features already present: {dest}")
     else:
         log("Downloading validation features (~180 MB)…")

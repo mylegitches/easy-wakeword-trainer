@@ -3,11 +3,12 @@
 # Training itself requires the full Dockerfile (torch, speechbrain, onnx2tf, etc.).
 FROM python:3.11-slim-bookworm
 
-# wget/curl/git needed by prepare_data.py
+# wget/curl/git for prepare_data.py; ffmpeg for MP3 decoding (FMA dataset via librosa)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
     git \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

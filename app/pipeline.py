@@ -451,7 +451,9 @@ async def run_prepare(job: PrepareJob) -> None:
 
         rc = await proc.wait()
         if rc != 0:
-            raise RuntimeError(f"prepare_data.py exited with code {rc}")
+            # Last few log lines contain the traceback — surface them in the error message
+            tail = "\n".join(job.log_lines[-10:])
+            raise RuntimeError(f"prepare_data.py exited with code {rc}:\n{tail}")
 
         job.stage = PrepareStage.DONE
         await job._queue.put(("done", "All assets downloaded and ready."))

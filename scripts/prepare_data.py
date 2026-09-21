@@ -39,66 +39,92 @@ def log(msg: str) -> None:
 def stream_download(url: str, dest: Path, desc: str = "", report_every_mb: int = 200) -> None:
     """
     Stream-download url → dest using requests, logging progress every
-    report_every_mb megabytes. Supports resume: if dest already exists
-    as a partial file, sends a Range header to continue from where it left off.
-    Produces far fewer log lines than wget --show-progress (one per N MB vs one per 50KB).
+    report_every_mb megabytes.
+
+    - Resume: if dest already has bytes, sends a Range header to skip them.
+    - Retry: up to MAX_RETRIES times on timeout/connection errors, always resuming.
+    - Timeout: (30s connect, 120s read-per-chunk). HF CDN sometimes stalls
+      mid-transfer; 120s per 8MB chunk is generous enough to survive slow bursts.
     """
     import requests
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     report_every = report_every_mb * 1024 * 1024
-    CHUNK = 8 * 1024 * 1024  # 8 MB read chunks
+    CHUNK = 8 * 1024 * 1024   # 8 MB per read call
+    MAX_RETRIES = 15
 
-    # Resume support: check existing partial file
-    resume_from = dest.stat().st_size if dest.exists() else 0
-    headers = {}
-    if resume_from:
-        headers["Range"] = f"bytes={resume_from}-"
-        log(f"Resuming {desc or dest.name} from {resume_from / 1024**2:.0f} MB")
+    _RETRYABLE = (
+        requests.exceptions.ConnectionError,
+        requests.exceptions.ReadTimeout,
+        requests.exceptions.ChunkedEncodingError,
+    )
 
-    r = requests.get(url, stream=True, timeout=60, headers=headers)
+    t_global_start = time.time()
 
-    # 416 = Range Not Satisfiable → file is already complete
-    if r.status_code == 416:
-        log(f"{desc or dest.name}: already fully downloaded")
-        return
-    r.raise_for_status()
+    for attempt in range(1, MAX_RETRIES + 1):
+        resume_from = dest.stat().st_size if dest.exists() else 0
+        headers = {}
+        if resume_from:
+            headers["Range"] = f"bytes={resume_from}-"
+            if attempt == 1:
+                log(f"Resuming {desc or dest.name} from {resume_from / 1024**2:.0f} MB")
+            else:
+                log(f"Retry {attempt}/{MAX_RETRIES}: resuming from {resume_from / 1024**2:.0f} MB")
 
-    total_remote = int(r.headers.get("content-length", 0))
-    total = resume_from + total_remote  # full file size
+        try:
+            r = requests.get(url, stream=True, timeout=(30, 120), headers=headers)
 
-    mode = "ab" if resume_from else "wb"
-    downloaded = resume_from
-    last_report = resume_from
-    last_t = time.time()
-    t_start = last_t
+            # 416 = Range Not Satisfiable → file is already complete
+            if r.status_code == 416:
+                log(f"{desc or dest.name}: already fully downloaded")
+                return
+            r.raise_for_status()
 
-    with open(dest, mode) as f:
-        for chunk in r.iter_content(CHUNK):
-            if not chunk:
-                continue
-            f.write(chunk)
-            downloaded += len(chunk)
+            total_remote = int(r.headers.get("content-length", 0))
+            total = resume_from + total_remote  # full file size
 
-            if downloaded - last_report >= report_every:
-                elapsed = max(time.time() - last_t, 0.001)
-                speed_mb = (downloaded - last_report) / elapsed / 1024 / 1024
-                done_gb = downloaded / 1024 ** 3
-                if total:
-                    pct = min(100, downloaded * 100 // total)
-                    total_gb = total / 1024 ** 3
-                    eta_s = int((total - downloaded) / max(downloaded / max(time.time() - t_start, 0.001), 0.001))
-                    eta = f"ETA {eta_s // 60}m{eta_s % 60:02d}s"
-                    log(f"  {done_gb:.2f} / {total_gb:.2f} GB ({pct}%) @ {speed_mb:.1f} MB/s  {eta}")
-                else:
-                    log(f"  {done_gb:.2f} GB @ {speed_mb:.1f} MB/s")
-                last_report = downloaded
-                last_t = time.time()
+            mode = "ab" if resume_from else "wb"
+            downloaded = resume_from
+            last_report = resume_from
+            last_t = time.time()
 
-    final_gb = downloaded / 1024 ** 3
-    elapsed = max(time.time() - t_start, 0.001)
-    avg_mb = downloaded / elapsed / 1024 / 1024
-    log(f"  Done: {final_gb:.2f} GB in {elapsed / 60:.1f} min (avg {avg_mb:.1f} MB/s)")
+            with open(dest, mode) as f:
+                for chunk in r.iter_content(CHUNK):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    downloaded += len(chunk)
+
+                    if downloaded - last_report >= report_every:
+                        elapsed = max(time.time() - last_t, 0.001)
+                        speed_mb = (downloaded - last_report) / elapsed / 1024 / 1024
+                        done_gb = downloaded / 1024 ** 3
+                        if total:
+                            pct = min(100, downloaded * 100 // total)
+                            total_gb = total / 1024 ** 3
+                            total_elapsed = max(time.time() - t_global_start, 0.001)
+                            overall_speed = downloaded / total_elapsed
+                            eta_s = int((total - downloaded) / max(overall_speed, 1))
+                            eta = f"ETA {eta_s // 60}m{eta_s % 60:02d}s"
+                            log(f"  {done_gb:.2f} / {total_gb:.2f} GB ({pct}%) @ {speed_mb:.1f} MB/s  {eta}")
+                        else:
+                            log(f"  {done_gb:.2f} GB @ {speed_mb:.1f} MB/s")
+                        last_report = downloaded
+                        last_t = time.time()
+
+            # Download complete
+            final_gb = downloaded / 1024 ** 3
+            total_elapsed = max(time.time() - t_global_start, 0.001)
+            avg_mb = downloaded / total_elapsed / 1024 / 1024
+            log(f"  Done: {final_gb:.2f} GB in {total_elapsed / 60:.1f} min (avg {avg_mb:.1f} MB/s)")
+            return
+
+        except _RETRYABLE as exc:
+            wait = min(60, 5 * attempt)
+            log(f"  Network stall (attempt {attempt}/{MAX_RETRIES}): {type(exc).__name__} — retrying in {wait}s…")
+            time.sleep(wait)
+
+    raise RuntimeError(f"Download failed after {MAX_RETRIES} attempts: {url}")
 
 
 # ── HuggingFace base URLs ─────────────────────────────────────────────────

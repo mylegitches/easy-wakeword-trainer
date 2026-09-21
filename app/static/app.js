@@ -157,12 +157,21 @@ function connectPrepareSSE(jobId) {
 }
 
 async function pollPrepare(intervalMs = 3000) {
+  // Track how many lines we've already shown so we never re-append history.
+  // Count current lines in the panel from before SSE dropped.
+  let shownLines = prepareLog.textContent
+    ? prepareLog.textContent.split("\n").length
+    : 0;
+
   while (true) {
     await new Promise((r) => setTimeout(r, intervalMs));
     try {
       const res  = await fetch("/api/prepare/status");
       const data = await res.json();
-      (data.log_lines || []).forEach(appendPrepareLog);
+      const lines = data.log_lines || [];
+      // Only append lines we haven't shown yet
+      lines.slice(shownLines).forEach(appendPrepareLog);
+      shownLines = lines.length;
       if (data.stage === "done")  { onPrepareComplete(); return; }
       if (data.stage === "error") {
         appendPrepareLog("ERROR: " + (data.error || "Download failed."));

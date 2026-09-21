@@ -32,6 +32,65 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # ---------------------------------------------------------------------------
+# Startup hooks — run once at container start, skip if files already exist.
+# ---------------------------------------------------------------------------
+
+@app.on_event("startup")
+async def _startup_once() -> None:
+    """
+    Two idempotent tasks on every startup:
+
+    1. Download OWW base ONNX models (melspectrogram + embedding) if missing.
+       These are bind-mounted at ./data/oww-models so they survive restarts.
+
+    2. Symlink each *.pt Piper TTS weight from the data volume into the
+       piper-sample-generator scripts dir so generate_samples.py's hardcoded
+       default path (Path(__file__).parent / "models") resolves correctly.
+    """
+    import asyncio
+    import logging
+    import urllib.request
+
+    loop = asyncio.get_event_loop()
+
+    # ── 1. OWW ONNX base models ────────────────────────────────────────────
+    OWW_MODELS_BASE = (
+        "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/"
+    )
+    oww_models_dir = pl.OWW_DIR / "openwakeword" / "resources" / "models"
+    oww_models_dir.mkdir(parents=True, exist_ok=True)
+
+    for fname in ("melspectrogram.onnx", "embedding_model.onnx"):
+        dest = oww_models_dir / fname
+        if dest.exists():
+            continue
+        url = OWW_MODELS_BASE + fname
+        logging.info("[startup] Downloading %s …", fname)
+        try:
+            await loop.run_in_executor(None, urllib.request.urlretrieve, url, dest)
+            logging.info("[startup] Saved %s (%d KB)", fname, dest.stat().st_size // 1024)
+        except Exception as exc:
+            logging.error("[startup] Failed to download %s: %s", fname, exc)
+
+    # ── 2. Piper .pt weight symlinks ────────────────────────────────────────
+    src_dir = pl.DATA_DIR / "piper-sample-generator" / "models"
+    dst_dir = pl.PIPER_GEN_DIR / "models"
+    if not src_dir.exists():
+        logging.warning("[startup] Piper model source dir not found: %s", src_dir)
+        return
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for pt_file in src_dir.glob("*.pt"):
+        dst = dst_dir / pt_file.name
+        if dst.is_symlink() or dst.exists():
+            continue
+        try:
+            dst.symlink_to(pt_file)
+            logging.info("[startup] Linked piper model: %s", pt_file.name)
+        except Exception as exc:
+            logging.warning("[startup] Could not symlink %s: %s", pt_file.name, exc)
+
+
+# ---------------------------------------------------------------------------
 # Root — serve UI
 # ---------------------------------------------------------------------------
 

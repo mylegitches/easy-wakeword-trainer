@@ -1,36 +1,66 @@
-# Dockerfile.dev — web layer + data-download layer (no torch/training stack).
-# Supports: UI, health check, automatic first-run data download with live progress.
-# Training itself requires the full Dockerfile (torch, speechbrain, onnx2tf, etc.).
+# Dockerfile.dev — unified image: data download + full training pipeline.
+# Previously split into "dev" (UI only) and full; now merged into one image
+# so training works out of the box.
 FROM python:3.11-slim-bookworm
 
-# wget/curl/git for prepare_data.py; ffmpeg for MP3 decoding (FMA dataset via librosa)
+# System deps: git (clones), build-essential (piper-phonemize wheels),
+# libsndfile1 + ffmpeg (audio decode for datasets library and librosa),
+# wget/curl (fallback downloads)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
     wget \
     curl \
-    git \
+    build-essential \
+    libsndfile1 \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Pin multiprocess first — avoids the long pip backtrack caused by datasets' loose dep
+# Clone openWakeWord training codebase (pinned tag)
+RUN git clone --depth 1 --branch v0.6.0 \
+    https://github.com/dscripka/openWakeWord /app/openwakeword
+
+# Clone piper-sample-generator (training scripts; model weights live in /data volume)
+RUN git clone --depth 1 --branch v2.0.0 \
+    https://github.com/rhasspy/piper-sample-generator /app/piper-sample-generator
+
+# ── Python deps ───────────────────────────────────────────────────────────
+# Pin multiprocess/dill first to prevent pip backtracking from datasets' loose deps
 RUN pip install --no-cache-dir multiprocess==0.70.15 dill==0.3.7
 
+# Pin pyarrow/fsspec/huggingface-hub BEFORE installing datasets==2.14.6 so pip
+# doesn't upgrade pyarrow to 14+ (which breaks datasets 2.14.6).
 RUN pip install --no-cache-dir \
-    fastapi==0.111.0 \
-    "uvicorn[standard]==0.29.0" \
-    python-multipart==0.0.9 \
-    pyyaml==6.0.1 \
-    numpy==1.26.4 \
-    scipy==1.13.0 \
-    soundfile \
-    librosa \
     "pyarrow==13.0.0" \
     "fsspec==2023.10.0" \
-    "huggingface-hub==0.19.4" \
-    "datasets==2.14.6"
+    "huggingface-hub==0.19.4"
 
-# App code only — no openwakeword or piper clones needed for UI
+# Full training + web stack (torch, speechbrain, onnx, fastapi, etc.)
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Audio decode libs needed by datasets/librosa during data download
+RUN pip install --no-cache-dir soundfile librosa
+
+# Install openWakeWord in editable mode so train.py is importable
+RUN pip install --no-cache-dir -e /app/openwakeword
+
+# Patch DataLoader to num_workers=0 — avoids the >2GB IPC pipe limit when
+# the ACAV features tensor is shared across worker subprocesses.
+RUN python3 -c "\
+path='/app/openwakeword/openwakeword/train.py'; \
+c=open(path).read(); \
+c=c.replace('batch_size=None, num_workers=n_cpus, prefetch_factor=16','batch_size=None, num_workers=0'); \
+open(path,'w').write(c); \
+print('Patched train.py num_workers=0') \
+"
+
+
+# TFLite export (separate because it pulls keras/tf which can conflict with torch)
+RUN pip install --no-cache-dir onnx2tf
+
+# ── App code ──────────────────────────────────────────────────────────────
 COPY app/ /app/app/
 COPY scripts/ /app/scripts/
 COPY make_validation_small.py /app/make_validation_small.py

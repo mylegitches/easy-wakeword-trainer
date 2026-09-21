@@ -243,11 +243,20 @@ async def _run_step(
     job.stage = stage
     await job._queue.put((stage.value, f"--- [{stage.value.upper()}] starting ---"))
 
+    # The generate step needs generate_samples.py (from piper-sample-generator)
+    # on the Python path. We expose PIPER_GEN_DIR for all steps — harmless for others.
+    import os as _os
+    env = _os.environ.copy()
+    existing_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(PIPER_GEN_DIR) + (":" + existing_pp if existing_pp else "")
+
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         cwd=str(OWW_DIR),
+        env=env,
+        limit=64 * 1024 * 1024,  # 64 MB — default 64 KB causes LimitOverrunError on long tqdm lines
     )
 
     assert proc.stdout is not None

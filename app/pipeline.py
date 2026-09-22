@@ -401,7 +401,16 @@ async def stream_events(job: TrainJob) -> AsyncIterator[str]:
         return
 
     while True:
-        item = await asyncio.wait_for(job._queue.get(), timeout=30)
+        try:
+            item = await asyncio.wait_for(job._queue.get(), timeout=25)
+        except asyncio.TimeoutError:
+            # No output for 25 s — send an SSE comment to keep the connection alive
+            # and let the client know training is still running.
+            if job.is_done():
+                yield _sse(job.stage.value, job.error or job.model_name)
+                return
+            yield f": keepalive stage={job.stage.value}\n\n"
+            continue
         if item is None:
             # Re-enqueue sentinel so multiple consumers all see it
             await job._queue.put(None)

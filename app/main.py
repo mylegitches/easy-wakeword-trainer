@@ -14,14 +14,14 @@ Endpoints:
 
 import asyncio
 import uuid
+import struct
+import numpy as np
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-
-import uuid
 
 from app import pipeline as pl
 
@@ -295,3 +295,91 @@ async def download_tflite(job_id: str):
         media_type="application/octet-stream",
         filename=f"{job.model_name}.tflite",
     )
+
+
+# ---------------------------------------------------------------------------
+# Model browser — list available trained .onnx models
+# ---------------------------------------------------------------------------
+
+@app.get("/api/models")
+async def list_models():
+    """Return all .onnx files found under /outputs, grouped by model name."""
+    output_dir = pl.OUTPUT_DIR
+    models = []
+    for onnx_file in sorted(output_dir.rglob("*.onnx")):
+        models.append({
+            "name": onnx_file.stem,
+            "path": str(onnx_file.relative_to(output_dir)),
+            "size_kb": round(onnx_file.stat().st_size / 1024),
+        })
+    return {"models": models}
+
+
+# ---------------------------------------------------------------------------
+# Wake word tester — WebSocket live inference
+# ---------------------------------------------------------------------------
+# Protocol:
+#   Client → binary: raw 16-bit signed PCM at 16 kHz, any chunk size
+#   Server → JSON:   {"score": float, "detected": bool}
+# ---------------------------------------------------------------------------
+
+_DETECTION_THRESHOLD = 0.5
+_SAMPLE_RATE = 16000
+
+
+@app.websocket("/api/test/{model_name}")
+async def test_wakeword(websocket: WebSocket, model_name: str):
+    """
+    Stream microphone audio (16 kHz s16le PCM) and receive detection scores.
+    model_name must match the stem of a .onnx file in /outputs.
+    """
+    import openwakeword
+
+    # Locate the model
+    onnx_candidates = list(pl.OUTPUT_DIR.rglob(f"{model_name}.onnx"))
+    if not onnx_candidates:
+        await websocket.close(code=4004, reason=f"Model '{model_name}' not found")
+        return
+
+    onnx_path = str(onnx_candidates[0])
+
+    await websocket.accept()
+    try:
+        # Load OWW model (this blocks for a moment — run in executor)
+        loop = asyncio.get_event_loop()
+        oww_model = await loop.run_in_executor(
+            None,
+            lambda: openwakeword.Model(
+                wakeword_models=[onnx_path],
+                enable_speex_noise_suppression=False,
+            ),
+        )
+
+        audio_buf = np.array([], dtype=np.int16)
+
+        while True:
+            data = await websocket.receive_bytes()
+            # Decode s16le PCM
+            chunk = np.frombuffer(data, dtype=np.int16)
+            audio_buf = np.concatenate([audio_buf, chunk])
+
+            # OWW needs at least 1280 samples per call (80 ms at 16 kHz)
+            while len(audio_buf) >= 1280:
+                frame = audio_buf[:1280]
+                audio_buf = audio_buf[1280:]
+
+                prediction = oww_model.predict(frame)
+                score = float(list(prediction.values())[0])
+                detected = score >= _DETECTION_THRESHOLD
+
+                await websocket.send_json({"score": round(score, 4), "detected": detected})
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        import logging
+        logging.error("Test WebSocket error: %s", exc)
+        try:
+            await websocket.close(code=1011, reason=str(exc))
+        except Exception:
+            pass

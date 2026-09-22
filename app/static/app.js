@@ -326,6 +326,8 @@ function showDownloads(jobId) {
   dlOnnx.href   = `/api/train/${jobId}/download/onnx`;
   dlTflite.href = `/api/train/${jobId}/download/tflite`;
   downloadSection.classList.remove("hidden");
+  // Refresh the tester model list so the new model appears immediately
+  document.dispatchEvent(new Event("trainingDone"));
 }
 
 function showError(msg) {
@@ -349,4 +351,155 @@ function setJobRunning(running) {
   jobRunning = running;
   phraseInput.disabled = running;
   updateTrainBtn();
+}
+
+// =============================================================================
+// TESTER — browse models, stream mic audio, show live detection
+// =============================================================================
+
+const modelSelect  = document.getElementById("model-select");
+const micBtn       = document.getElementById("mic-btn");
+const detectorRing = document.getElementById("detector-ring");
+const detectorLbl  = document.getElementById("detector-label");
+const scoreBar     = document.getElementById("score-bar");
+const scoreVal     = document.getElementById("score-val");
+
+let testerWs       = null;
+let audioCtx       = null;
+let mediaStream    = null;
+let scriptNode     = null;
+let detectionTimer = null;
+
+// Populate model dropdown on load
+async function loadModels() {
+  try {
+    const res = await fetch("/api/models");
+    const { models } = await res.json();
+    modelSelect.innerHTML = '<option value="">— select a model —</option>';
+    models.forEach(m => {
+      const opt = document.createElement("option");
+      opt.value = m.name;
+      opt.textContent = `${m.name}  (${m.size_kb} KB)`;
+      modelSelect.appendChild(opt);
+    });
+    micBtn.disabled = models.length === 0;
+  } catch (e) {
+    console.warn("Could not load models:", e);
+  }
+}
+loadModels();
+// Refresh model list after a training job completes
+document.addEventListener("trainingDone", loadModels);
+
+modelSelect.addEventListener("change", () => {
+  if (testerWs) stopListening();
+  micBtn.disabled = !modelSelect.value;
+  micBtn.textContent = "🎤 Start Listening";
+  micBtn.classList.remove("listening");
+  resetDetector();
+});
+
+micBtn.addEventListener("click", () => {
+  if (testerWs) {
+    stopListening();
+  } else {
+    startListening();
+  }
+});
+
+async function startListening() {
+  const modelName = modelSelect.value;
+  if (!modelName) return;
+
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true }
+    });
+  } catch (e) {
+    alert("Microphone access denied: " + e.message);
+    return;
+  }
+
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  testerWs = new WebSocket(`${proto}://${location.host}/api/test/${encodeURIComponent(modelName)}`);
+  testerWs.binaryType = "arraybuffer";
+
+  testerWs.onopen = () => {
+    micBtn.textContent = "⏹ Stop Listening";
+    micBtn.classList.add("listening");
+    detectorLbl.textContent = "Listening…";
+    startMicCapture();
+  };
+
+  testerWs.onmessage = (evt) => {
+    const { score, detected } = JSON.parse(evt.data);
+    updateDetector(score, detected);
+  };
+
+  testerWs.onerror = (e) => console.error("Tester WS error", e);
+  testerWs.onclose = () => stopListening();
+}
+
+function startMicCapture() {
+  audioCtx = new AudioContext({ sampleRate: 16000 });
+  const source = audioCtx.createMediaStreamSource(mediaStream);
+
+  // ScriptProcessorNode gives us raw PCM floats; convert to s16le for OWW
+  scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+  scriptNode.onaudioprocess = (e) => {
+    if (!testerWs || testerWs.readyState !== WebSocket.OPEN) return;
+    const floats = e.inputBuffer.getChannelData(0);
+    const s16 = new Int16Array(floats.length);
+    for (let i = 0; i < floats.length; i++) {
+      s16[i] = Math.max(-32768, Math.min(32767, floats[i] * 32768));
+    }
+    testerWs.send(s16.buffer);
+  };
+
+  source.connect(scriptNode);
+  scriptNode.connect(audioCtx.destination);
+}
+
+function stopListening() {
+  if (scriptNode)   { scriptNode.disconnect(); scriptNode = null; }
+  if (audioCtx)     { audioCtx.close();        audioCtx = null; }
+  if (mediaStream)  { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (testerWs && testerWs.readyState < 2) testerWs.close();
+  testerWs = null;
+
+  micBtn.textContent = "🎤 Start Listening";
+  micBtn.classList.remove("listening");
+  detectorLbl.textContent = "—";
+  resetDetector();
+}
+
+function updateDetector(score, detected) {
+  const pct = Math.round(score * 100);
+  scoreBar.style.width = pct + "%";
+  scoreVal.textContent = `score: ${score.toFixed(3)}`;
+
+  if (detected) {
+    detectorRing.classList.add("active");
+    scoreBar.classList.add("hot");
+    detectorLbl.textContent = "✅ Detected!";
+
+    clearTimeout(detectionTimer);
+    detectionTimer = setTimeout(() => {
+      detectorRing.classList.remove("active");
+      scoreBar.classList.remove("hot");
+      detectorLbl.textContent = "Listening…";
+    }, 1500);
+  } else {
+    if (!detectorRing.classList.contains("active")) {
+      scoreBar.classList.remove("hot");
+    }
+  }
+}
+
+function resetDetector() {
+  clearTimeout(detectionTimer);
+  detectorRing.classList.remove("active");
+  scoreBar.classList.remove("hot");
+  scoreBar.style.width = "0%";
+  scoreVal.textContent = "";
 }

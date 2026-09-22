@@ -255,6 +255,102 @@ header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
 .missing-list li::before { content: "✗  "; color: var(--warning); }
 
 /* ------------------------------------------------------------------ */
+/* Tester                                                               */
+/* ------------------------------------------------------------------ */
+.tester-card { margin-top: 1.5rem; }
+
+.tester-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 0.25rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.tester-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 1rem 0;
+}
+
+.model-select {
+  flex: 1;
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.btn--mic {
+  background: #2563eb;
+  color: #fff;
+  white-space: nowrap;
+}
+.btn--mic:hover:not(:disabled) { background: #1d4ed8; }
+.btn--mic.listening { background: #dc2626; }
+.btn--mic.listening:hover { background: #b91c1c; }
+
+/* Detection indicator */
+.detector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1.25rem 0 0.5rem;
+}
+
+.detector-ring {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  background: var(--surface2);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.detector-ring.active {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.15);
+  box-shadow: 0 0 24px rgba(34, 197, 94, 0.5);
+}
+
+.detector-label {
+  font-size: 0.85rem;
+  color: var(--subtle);
+  letter-spacing: 0.04em;
+  min-height: 1.2em;
+}
+
+.score-bar-wrap {
+  width: 200px;
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.score-bar {
+  height: 100%;
+  width: 0%;
+  background: #2563eb;
+  border-radius: 3px;
+  transition: width 0.1s, background 0.1s;
+}
+
+.score-bar.hot { background: #22c55e; }
+
+.score-val {
+  font-size: 0.75rem;
+  color: var(--subtle);
+  font-family: var(--mono);
+  min-height: 1em;
+}
+
+/* ------------------------------------------------------------------ */
 /* Utility                                                              */
 /* ------------------------------------------------------------------ */
 .hidden { display: none !important; }

@@ -82,6 +82,29 @@
       <h2>Training failed</h2>
       <pre id="error-msg" class="error-msg"></pre>
     </section>
+
+    <!-- ── Tester section ───────────────────────────────────────────── -->
+    <section class="card tester-card">
+      <h2 class="tester-title">Test a Model</h2>
+      <p class="hint">Pick a trained model and speak into your mic. Lights up on detection.</p>
+
+      <div class="tester-controls">
+        <select id="model-select" class="model-select">
+          <option value="">— select a model —</option>
+        </select>
+        <button id="mic-btn" class="btn btn--mic" disabled>🎤 Start Listening</button>
+      </div>
+
+      <!-- Detection indicator -->
+      <div id="detector" class="detector">
+        <div id="detector-ring" class="detector-ring"></div>
+        <div id="detector-label" class="detector-label">—</div>
+        <div id="score-bar-wrap" class="score-bar-wrap">
+          <div id="score-bar" class="score-bar"></div>
+        </div>
+        <div id="score-val" class="score-val"></div>
+      </div>
+    </section>
   </div>
 
   <script src="/static/app.js"></script>

@@ -131,6 +131,15 @@ header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
 .btn--download  { background: var(--success); color: #000; }
 .btn--download:hover { opacity: 0.85; }
 
+.btn--preview {
+  background: var(--border);
+  color: var(--text);
+  padding: 0.7rem 0.9rem;
+  font-size: 1rem;
+}
+.btn--preview:hover:not(:disabled) { background: #3a3d52; }
+.btn--preview.loading { opacity: 0.6; cursor: wait; }
+
 .btn--secondary { background: var(--border); color: var(--text); }
 .btn--secondary:hover { opacity: 0.85; }
 

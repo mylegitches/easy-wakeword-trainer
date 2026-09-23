@@ -45,9 +45,11 @@
           autocomplete="off"
           spellcheck="false"
         />
+        <button id="preview-btn" class="btn btn--preview" disabled title="Hear how Piper will pronounce this phrase">🔊</button>
         <button id="train-btn" class="btn btn--primary" disabled>Train</button>
       </div>
       <p class="hint">Letters, numbers, and spaces only · max 6 words</p>
+      <audio id="preview-audio" style="display:none"></audio>
     </section>
 
     <!-- Progress section (hidden until job starts) -->

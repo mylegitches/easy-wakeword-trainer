@@ -20,6 +20,8 @@ const STAGE_ORDER = ["generate", "augment", "train", "export"];
 // ── DOM refs ──────────────────────────────────────────────────────────────
 const phraseInput     = document.getElementById("phrase-input");
 const trainBtn        = document.getElementById("train-btn");
+const previewBtn      = document.getElementById("preview-btn");
+const previewAudio    = document.getElementById("preview-audio");
 const prepareSection  = document.getElementById("prepare-section");
 const prepareTitle    = document.getElementById("prepare-title");
 const prepareSubtitle = document.getElementById("prepare-subtitle");
@@ -202,8 +204,45 @@ function appendPrepareLog(line) {
 // ── Button state ──────────────────────────────────────────────────────────
 function updateTrainBtn() {
   const hasText = phraseInput.value.trim().length > 0;
-  trainBtn.disabled = !hasText || !dataReady || jobRunning;
+  trainBtn.disabled    = !hasText || !dataReady || jobRunning;
+  previewBtn.disabled  = !hasText || jobRunning;
 }
+
+// ── Phrase preview (Piper TTS) ────────────────────────────────────────────
+previewBtn.addEventListener("click", async () => {
+  const phrase = phraseInput.value.trim();
+  if (!phrase) return;
+
+  previewBtn.classList.add("loading");
+  previewBtn.disabled = true;
+  previewBtn.textContent = "⏳";
+
+  try {
+    const res = await fetch("/api/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phrase }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      alert("Preview failed: " + (err.detail || res.statusText));
+      return;
+    }
+
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    previewAudio.src = url;
+    previewAudio.play();
+    previewAudio.onended = () => URL.revokeObjectURL(url);
+  } catch (e) {
+    alert("Preview error: " + e.message);
+  } finally {
+    previewBtn.classList.remove("loading");
+    previewBtn.textContent = "🔊";
+    updateTrainBtn();
+  }
+});
 
 // ── Phrase validation (mirrors server rules) ──────────────────────────────
 function clientValidate(phrase) {

@@ -10,9 +10,13 @@ Endpoints:
   GET  /api/train/{job_id}/download        — zip of .onnx + .tflite
   GET  /api/train/{job_id}/download/onnx   — .onnx only
   GET  /api/train/{job_id}/download/tflite — .tflite only
+  POST /api/preview             — generate a single Piper TTS WAV for a phrase
 """
 
 import asyncio
+import os
+import shutil
+import tempfile
 import uuid
 import struct
 import numpy as np
@@ -313,6 +317,81 @@ async def list_models():
             "size_kb": round(onnx_file.stat().st_size / 1024),
         })
     return {"models": models}
+
+
+# ---------------------------------------------------------------------------
+# Phrase preview — generate a single Piper TTS clip and stream it back
+# ---------------------------------------------------------------------------
+
+_PIPER_MODEL = "en_US-libritts_r-medium"
+
+class PreviewRequest(BaseModel):
+    phrase: str
+
+@app.post("/api/preview")
+async def preview_phrase(req: PreviewRequest):
+    """
+    Generate one Piper TTS sample for the given phrase and return it as audio/wav.
+    Uses the same model checkpoint already downloaded for training — no extra downloads.
+    """
+    phrase = req.phrase.strip()
+    if not phrase:
+        raise HTTPException(status_code=400, detail="phrase is empty")
+
+    # Check the model is available
+    model_path = pl.PIPER_GEN_DIR / "models" / f"{_PIPER_MODEL}.pt"
+    if not model_path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="Piper model not found. Run the data download step first.",
+        )
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="eww_preview_"))
+    try:
+        env = os.environ.copy()
+        existing_pp = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(pl.PIPER_GEN_DIR) + (":" + existing_pp if existing_pp else "")
+
+        cmd = [
+            "python3",
+            str(pl.PIPER_GEN_DIR / "generate_samples.py"),
+            phrase,
+            "--max-samples", "1",
+            "--model", str(model_path),
+            "--output-dir", str(tmp_dir),
+            "--batch-size", "1",
+        ]
+
+        loop = asyncio.get_event_loop()
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=str(pl.OWW_DIR),
+            env=env,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+
+        if proc.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Piper generation failed:\n{stdout.decode(errors='replace')}",
+            )
+
+        wavs = list(tmp_dir.glob("*.wav"))
+        if not wavs:
+            raise HTTPException(status_code=500, detail="No WAV file generated.")
+
+        wav_path = wavs[0]
+        wav_bytes = wav_path.read_bytes()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return StreamingResponse(
+        iter([wav_bytes]),
+        media_type="audio/wav",
+        headers={"Content-Disposition": f'inline; filename="preview.wav"'},
+    )
 
 
 # ---------------------------------------------------------------------------

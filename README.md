@@ -2,7 +2,7 @@
 
 A web app that turns a text phrase into a custom openWakeWord model — no coding, no notebooks, no cloud AI.
 
-Type a phrase, click Train, download `.onnx` + `.tflite`.
+Type a phrase, click **Train**, download `.onnx` + `.tflite`, then test it live in the browser with your microphone.
 
 ---
 
@@ -81,6 +81,17 @@ Open **http://localhost:8000** in your browser.
 3. Watch the live log: Generate → Augment → Train → Export
 4. Download `hey_computer.onnx` and/or `hey_computer.tflite`
 
+### 5. Test a wake word in the browser
+
+After training completes the **Test a Model** panel at the bottom of the page lets you try the model live:
+
+1. Select a trained model from the dropdown
+2. Select your microphone (the selector lists every audio input the browser sees by name)
+3. Click **Start Listening** — a green VU bar confirms audio is arriving
+4. Speak your phrase — the ring flashes green on detection, then returns to listening
+
+No server round-trip for audio: the browser streams 16 kHz PCM directly to the container over WebSocket, and openWakeWord scores each 80 ms frame in real time.
+
 ---
 
 ## Outputs
@@ -110,14 +121,18 @@ outputs/
 
 ```
 Browser
-  └─ GET  /                      Single-page UI (static HTML/CSS/JS)
-  └─ GET  /api/health            Data asset presence check
-  └─ POST /api/train             Start training job
-  └─ GET  /api/train/{id}/events Server-Sent Events (live log stream)
-  └─ GET  /api/train/{id}/download  Download zip / onnx / tflite
+  └─ GET  /                           Single-page UI (static HTML/CSS/JS)
+  └─ GET  /api/health                 Data asset presence check
+  └─ POST /api/train                  Start training job
+  └─ GET  /api/train/{id}/events      Server-Sent Events (live log stream)
+  └─ GET  /api/train/{id}/download    Download zip / onnx / tflite
+  └─ GET  /api/models                 List trained .onnx models in ./outputs
+  └─ WS   /api/test/{model_name}      Stream 16 kHz PCM, receive per-frame scores
 ```
 
-One job at a time. A second Submit while a job is running returns HTTP 409.
+One training job at a time. A second Submit while a job is running returns HTTP 409.
+
+Audio from the tester is captured via `AudioWorkletNode` (replaces the deprecated `ScriptProcessorNode`), converted to 16-bit PCM, and sent over WebSocket in 80 ms frames. The server scores each frame with openWakeWord's ONNX runtime.
 
 ---
 
@@ -138,6 +153,15 @@ Trained with the settings proven in the source pipeline:
 | `target_false_positives_per_hour` | 0.2 | Early-stop target |
 
 Edit `app/config_template.yaml` to change these permanently.
+
+---
+
+## Docker image notes
+
+- The image clones openWakeWord into `/app/oww-src` (not `/app/openwakeword`). Naming it `openwakeword` would shadow the installed package because Python's namespace importer finds the directory before the editable-install finder runs (CWD is `/app`).
+- `DataLoader num_workers` is patched to `0` at build time to avoid the >2 GB IPC pipe limit when sharing ACAV feature tensors across worker subprocesses.
+- `shm_size: 4gb` in `docker-compose.dev.yml` — PyTorch's default 64 MB `/dev/shm` causes bus errors during training.
+- OWW base models (`melspectrogram.onnx`, `embedding_model.onnx`) are downloaded from GitHub Releases on first startup and cached to `./data/oww-models/` (bind-mounted).
 
 ---
 

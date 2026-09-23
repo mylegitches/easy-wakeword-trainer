@@ -17,9 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Clone openWakeWord training codebase (pinned tag)
+# Clone openWakeWord training codebase (pinned tag).
+# IMPORTANT: clone into /app/oww-src, NOT /app/openwakeword.
+# If the directory is named "openwakeword", Python's namespace importer picks
+# it up as the package (CWD=/app) before the editable-install finder runs,
+# producing a broken namespace package with no __init__.py content.
 RUN git clone --depth 1 --branch v0.6.0 \
-    https://github.com/dscripka/openWakeWord /app/openwakeword
+    https://github.com/dscripka/openWakeWord /app/oww-src
 
 # Clone piper-sample-generator (training scripts; model weights live in /data volume)
 RUN git clone --depth 1 --branch v2.0.0 \
@@ -44,12 +48,12 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 RUN pip install --no-cache-dir soundfile librosa
 
 # Install openWakeWord in editable mode so train.py is importable
-RUN pip install --no-cache-dir -e /app/openwakeword
+RUN pip install --no-cache-dir -e /app/oww-src
 
 # Patch DataLoader to num_workers=0 — avoids the >2GB IPC pipe limit when
 # the ACAV features tensor is shared across worker subprocesses.
 RUN python3 -c "\
-path='/app/openwakeword/openwakeword/train.py'; \
+path='/app/oww-src/openwakeword/train.py'; \
 c=open(path).read(); \
 c=c.replace('batch_size=None, num_workers=n_cpus, prefetch_factor=16','batch_size=None, num_workers=0'); \
 open(path,'w').write(c); \
@@ -70,7 +74,7 @@ RUN mkdir -p /outputs /data
 ENV PYTHONUNBUFFERED=1
 ENV DATA_DIR=/data
 ENV OUTPUT_DIR=/outputs
-ENV OPENWAKEWORD_DIR=/app/openwakeword
+ENV OPENWAKEWORD_DIR=/app/oww-src
 ENV PIPER_GENERATOR_DIR=/app/piper-sample-generator
 
 EXPOSE 8000

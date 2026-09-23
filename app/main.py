@@ -333,7 +333,7 @@ async def test_wakeword(websocket: WebSocket, model_name: str):
     Stream microphone audio (16 kHz s16le PCM) and receive detection scores.
     model_name must match the stem of a .onnx file in /outputs.
     """
-    import openwakeword
+    from openwakeword.model import Model as OWWModel
 
     # Locate the model
     onnx_candidates = list(pl.OUTPUT_DIR.rglob(f"{model_name}.onnx"))
@@ -349,10 +349,7 @@ async def test_wakeword(websocket: WebSocket, model_name: str):
         loop = asyncio.get_event_loop()
         oww_model = await loop.run_in_executor(
             None,
-            lambda: openwakeword.Model(
-                wakeword_models=[onnx_path],
-                enable_speex_noise_suppression=False,
-            ),
+            lambda: OWWModel(wakeword_models=[onnx_path], inference_framework="onnx"),
         )
 
         audio_buf = np.array([], dtype=np.int16)

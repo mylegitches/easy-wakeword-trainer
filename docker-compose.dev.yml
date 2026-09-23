@@ -12,11 +12,11 @@ services:
     volumes:
       - ./data:/data
       - ./outputs:/outputs
-      - ./data/oww-models:/app/openwakeword/openwakeword/resources/models
+      - ./data/oww-models:/app/oww-src/openwakeword/resources/models
     environment:
       - DATA_DIR=/data
       - OUTPUT_DIR=/outputs
-      - OPENWAKEWORD_DIR=/app/openwakeword
+      - OPENWAKEWORD_DIR=/app/oww-src
       - PIPER_GENERATOR_DIR=/app/piper-sample-generator
     shm_size: '4gb'   # PyTorch DataLoader workers use /dev/shm; default 64 MB causes bus errors
     restart: unless-stopped

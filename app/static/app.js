@@ -357,18 +357,46 @@ function setJobRunning(running) {
 // TESTER — browse models, stream mic audio, show live detection
 // =============================================================================
 
-const modelSelect  = document.getElementById("model-select");
-const micBtn       = document.getElementById("mic-btn");
-const detectorRing = document.getElementById("detector-ring");
-const detectorLbl  = document.getElementById("detector-label");
-const scoreBar     = document.getElementById("score-bar");
-const scoreVal     = document.getElementById("score-val");
+const modelSelect    = document.getElementById("model-select");
+const micSelect      = document.getElementById("mic-select");
+const micActiveLabel = document.getElementById("mic-active-label");
+const micBtn         = document.getElementById("mic-btn");
+const detectorRing   = document.getElementById("detector-ring");
+const detectorLbl    = document.getElementById("detector-label");
+const scoreBar       = document.getElementById("score-bar");
+const scoreVal       = document.getElementById("score-val");
+const vuRow          = document.getElementById("vu-row");
+const vuBar          = document.getElementById("vu-bar");
+const vuVal          = document.getElementById("vu-val");
 
 let testerWs       = null;
 let audioCtx       = null;
 let mediaStream    = null;
 let scriptNode     = null;
 let detectionTimer = null;
+
+// Populate microphone dropdown
+async function populateMicList() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const mics = devices.filter(d => d.kind === "audioinput");
+    const prev = micSelect.value;
+    micSelect.innerHTML = '<option value="">🎙 Default microphone</option>';
+    mics.forEach(d => {
+      const opt = document.createElement("option");
+      opt.value = d.deviceId;
+      opt.textContent = d.label || `Microphone ${micSelect.options.length}`;
+      micSelect.appendChild(opt);
+    });
+    // Restore previous selection if still present
+    if (prev && [...micSelect.options].some(o => o.value === prev)) micSelect.value = prev;
+  } catch (e) {
+    console.warn("Could not enumerate audio devices:", e);
+  }
+}
+populateMicList();
+// Re-enumerate after user grants permission (labels appear after first grant)
+navigator.mediaDevices.addEventListener("devicechange", populateMicList);
 
 // Populate model dropdown on load
 async function loadModels() {
@@ -411,10 +439,22 @@ async function startListening() {
   const modelName = modelSelect.value;
   if (!modelName) return;
 
+  const selectedDeviceId = micSelect.value;
+  const audioConstraints = {
+    sampleRate: 16000,
+    channelCount: 1,
+    echoCancellation: true,
+    ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : {}),
+  };
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true }
-    });
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+    // Re-populate now that we have permission (labels may have been blank)
+    await populateMicList();
+    // Show which mic is actually active
+    const track = mediaStream.getAudioTracks()[0];
+    const label = track?.label || selectedDeviceId || "Default microphone";
+    micActiveLabel.textContent = `🎙 ${label}`;
+    micActiveLabel.style.display = "block";
   } catch (e) {
     alert("Microphone access denied: " + e.message);
     return;
@@ -424,11 +464,18 @@ async function startListening() {
   testerWs = new WebSocket(`${proto}://${location.host}/api/test/${encodeURIComponent(modelName)}`);
   testerWs.binaryType = "arraybuffer";
 
-  testerWs.onopen = () => {
+  testerWs.onopen = async () => {
     micBtn.textContent = "⏹ Stop Listening";
     micBtn.classList.add("listening");
     detectorLbl.textContent = "Listening…";
-    startMicCapture();
+    try {
+      await startMicCapture();
+      vuRow.style.display = "flex";
+    } catch (e) {
+      console.error("Mic capture failed:", e);
+      detectorLbl.textContent = "Mic error: " + e.message;
+      stopListening();
+    }
   };
 
   testerWs.onmessage = (evt) => {
@@ -440,37 +487,58 @@ async function startListening() {
   testerWs.onclose = () => stopListening();
 }
 
-function startMicCapture() {
+async function startMicCapture() {
   audioCtx = new AudioContext({ sampleRate: 16000 });
-  const source = audioCtx.createMediaStreamSource(mediaStream);
 
-  // ScriptProcessorNode gives us raw PCM floats; convert to s16le for OWW
-  scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
-  scriptNode.onaudioprocess = (e) => {
-    if (!testerWs || testerWs.readyState !== WebSocket.OPEN) return;
-    const floats = e.inputBuffer.getChannelData(0);
-    const s16 = new Int16Array(floats.length);
-    for (let i = 0; i < floats.length; i++) {
-      s16[i] = Math.max(-32768, Math.min(32767, floats[i] * 32768));
+  // AudioWorklet runs in a dedicated audio thread — no main-thread blocking,
+  // no ScriptProcessorNode deprecation warning.
+  await audioCtx.audioWorklet.addModule("/static/mic-processor.js");
+
+  const source   = audioCtx.createMediaStreamSource(mediaStream);
+  scriptNode     = new AudioWorkletNode(audioCtx, "mic-processor");
+
+  scriptNode.port.onmessage = (evt) => {
+    // Compute RMS for VU meter before handing buffer to WebSocket
+    const int16 = new Int16Array(evt.data);
+    let sumSq = 0;
+    for (let i = 0; i < int16.length; i++) {
+      const s = int16[i] / 32768;
+      sumSq += s * s;
     }
-    testerWs.send(s16.buffer);
+    const rms = Math.sqrt(sumSq / int16.length);
+    updateVu(rms);
+
+    if (!testerWs || testerWs.readyState !== WebSocket.OPEN) return;
+    testerWs.send(evt.data); // ArrayBuffer — WS copies it, buffer stays valid
   };
 
   source.connect(scriptNode);
-  scriptNode.connect(audioCtx.destination);
+  // No connection to destination — we don't want mic audio playing back
 }
 
 function stopListening() {
-  if (scriptNode)   { scriptNode.disconnect(); scriptNode = null; }
-  if (audioCtx)     { audioCtx.close();        audioCtx = null; }
-  if (mediaStream)  { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (scriptNode)  { scriptNode.port.close(); scriptNode.disconnect(); scriptNode = null; }
+  if (audioCtx)    { audioCtx.close();        audioCtx = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   if (testerWs && testerWs.readyState < 2) testerWs.close();
   testerWs = null;
 
   micBtn.textContent = "🎤 Start Listening";
   micBtn.classList.remove("listening");
+  micActiveLabel.style.display = "none";
+  vuRow.style.display = "none";
+  updateVu(0);
   detectorLbl.textContent = "—";
   resetDetector();
+}
+
+function updateVu(rms) {
+  // rms is 0..1 (float), map to display percentage with some headroom
+  const pct = Math.min(100, rms * 400); // amplify so normal speech ~50-80%
+  vuBar.style.width = pct + "%";
+  vuBar.classList.toggle("hot",  pct > 60);
+  vuBar.classList.toggle("clip", pct > 90);
+  vuVal.textContent = rms > 0 ? rms.toFixed(3) : "—";
 }
 
 function updateDetector(score, detected) {

@@ -89,10 +89,23 @@
       <p class="hint">Pick a trained model and speak into your mic. Lights up on detection.</p>
 
       <div class="tester-controls">
-        <select id="model-select" class="model-select">
+        <label class="tester-label">Model</label>
+        <select id="model-select" class="tester-select">
           <option value="">— select a model —</option>
         </select>
+        <label class="tester-label">Microphone</label>
+        <select id="mic-select" class="tester-select">
+          <option value="">Default microphone</option>
+        </select>
         <button id="mic-btn" class="btn btn--mic" disabled>🎤 Start Listening</button>
+      </div>
+      <div id="mic-active-label" class="mic-active-label" style="display:none"></div>
+
+      <!-- Live input level (VU meter) -->
+      <div class="vu-row" id="vu-row" style="display:none">
+        <span class="vu-label">Input</span>
+        <div class="vu-bg"><div id="vu-bar" class="vu-bar"></div></div>
+        <span id="vu-val" class="vu-val">—</span>
       </div>
 
       <!-- Detection indicator -->

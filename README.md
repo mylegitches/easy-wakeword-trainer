@@ -2,7 +2,7 @@
 
 A web app that turns a text phrase into a custom openWakeWord model — no coding, no notebooks, no cloud AI.
 
-Type a phrase, click **Train**, download `.onnx` + `.tflite`, then test it live in the browser with your microphone.
+Type a phrase, preview how Piper will say it, click **Train**, download `.onnx` + `.tflite`, then test it live in the browser with your microphone.
 
 ---
 
@@ -74,12 +74,13 @@ docker compose up --build
 
 Open **http://localhost:8000** in your browser.
 
-### 4. Train a wake word
+### 4. Preview, then train a wake word
 
 1. Type a phrase (e.g. `hey computer`)
-2. Click **Train**
-3. Watch the live log: Generate → Augment → Train → Export
-4. Download `hey_computer.onnx` and/or `hey_computer.tflite`
+2. Click **🔊** to hear how Piper will pronounce it — same `en_US-libritts_r-medium.pt` checkpoint used for training, no extra download
+3. Click **Train**
+4. Watch the live log: Generate → Augment → Train → Export
+5. Download `hey_computer.onnx` and/or `hey_computer.tflite`
 
 ### 5. Test a wake word in the browser
 
@@ -126,11 +127,14 @@ Browser
   └─ POST /api/train                  Start training job
   └─ GET  /api/train/{id}/events      Server-Sent Events (live log stream)
   └─ GET  /api/train/{id}/download    Download zip / onnx / tflite
+  └─ POST /api/preview                One Piper TTS clip for the typed phrase (audio/wav)
   └─ GET  /api/models                 List trained .onnx models in ./outputs
   └─ WS   /api/test/{model_name}      Stream 16 kHz PCM, receive per-frame scores
 ```
 
 One training job at a time. A second Submit while a job is running returns HTTP 409.
+
+`POST /api/preview` runs `generate_samples.py --max-samples 1` with the already-downloaded Piper checkpoint and returns a WAV. First play after a cold start can take ~10 seconds while the model loads.
 
 Audio from the tester is captured via `AudioWorkletNode` (replaces the deprecated `ScriptProcessorNode`), converted to 16-bit PCM, and sent over WebSocket in 80 ms frames. The server scores each frame with openWakeWord's ONNX runtime.
 

@@ -1,5 +1,19 @@
 # easy-wakeword-trainer
 
+> [!IMPORTANT]
+> **This project has moved into [Speech Model Toolkit](https://github.com/mylegitches/speech-model-toolkit).**
+>
+> The wake word trainer lives on there as the **Wake Word** tab, with the same phrase → preview → train → test workflow, alongside:
+> - **Voice**: clone a voice for Piper text-to-speech (read sentences, talk freely, or import audio/video with speaker detection)
+> - **Test Lab**: say your wake word and hear your own voice answer, optionally powered by any AI model
+> - **Settings**, a mobile-friendly installable UI, and clear errors and logging throughout
+>
+> Everything runs in one Docker container. New features and fixes only go into Speech Model Toolkit; this repository is no longer maintained.
+>
+> **Moving over?** Copy this project's `./data/*` to `speech-model-toolkit/data/wakeword/` and `./outputs/*` to `speech-model-toolkit/data/wakeword-models/`: your downloaded training data and trained models carry over, nothing needs downloading again.
+
+---
+
 A web app that turns a text phrase into a custom openWakeWord model — no coding, no notebooks, no cloud AI.
 
 Type a phrase, preview how Piper will say it, click **Train**, download `.onnx` + `.tflite`, then test it live in the browser with your microphone.
